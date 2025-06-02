@@ -1,0 +1,11 @@
+{
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 200,
+  "semi": true,
+  "tabWidth": 4,
+  "only-format-modified": true,
+  "importOrder": [],
+  "importOrderSeparation": false,
+  "importOrderSortSpecifiers": false
+}
