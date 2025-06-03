@@ -357,7 +357,7 @@ export class GeyserSwapEventService implements OnModuleInit {
                 amountSol,
                 amountToken,
             });
-        } else if (amountSol > 3 && type == 'buy') {
+        } else if (amountSol > 1 && type == 'buy') {
             this.trackingWhaleTxns.get(txn.pair)[txn.signer] = [
                 {
                     timestamp: date,
@@ -514,7 +514,7 @@ export class GeyserSwapEventService implements OnModuleInit {
         let holdOver10M = 0;
         let holdOver20M = 0;
         let holdOver30M = 0;
-        const top10Addresses = [];
+        let realHolders = 0;
         const top10 = Object.entries(holders)
             .filter(([balance, addr]) => {
                 if (addr == pair) return false;
@@ -525,6 +525,8 @@ export class GeyserSwapEventService implements OnModuleInit {
                 if (realBal >= 20 && realBal < 30) holdOver20M += 1;
                 if (realBal >= 30) holdOver30M += 1;
 
+                if (Number(balance) > 1000) realHolders += 1;
+
                 if (this.trackingWhaleTxns.get(pair)[addr as any]) {
                     this.trackingWhaleTxns.get(pair)[addr as any][0].lastTokenBalance = Number(balance);
                 }
@@ -533,7 +535,6 @@ export class GeyserSwapEventService implements OnModuleInit {
             })
             .slice(-10)
             .reduce((total, [balance, addr]) => {
-                top10Addresses.push({ address: addr, balance: Number(balance) });
                 return (total += Number(balance));
             }, 0);
 
@@ -544,6 +545,7 @@ export class GeyserSwapEventService implements OnModuleInit {
             holdOver30M,
             top10: Math.floor((top10 / 10 ** 9) * 100),
             holders: Object.keys(holders).length,
+            realHolders,
         };
     }
 }
