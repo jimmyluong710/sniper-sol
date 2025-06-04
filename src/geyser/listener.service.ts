@@ -357,7 +357,7 @@ export class GeyserSwapEventService implements OnModuleInit {
                 amountSol,
                 amountToken,
             });
-        } else if (amountSol > 1 && type == 'buy') {
+        } else if (amountSol > 3 && type == 'buy') {
             this.trackingWhaleTxns.get(txn.pair)[txn.signer] = [
                 {
                     timestamp: date,
