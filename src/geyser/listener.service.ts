@@ -47,6 +47,20 @@ export class GeyserSwapEventService implements OnModuleInit {
         >
     > = new Map();
 
+    private trackingFistTop10: Map<
+        string,
+        Record<
+            string,
+            {
+                timestamp: Date;
+                type?: 'buy' | 'sell';
+                amountSol?: number;
+                amountToken?: number;
+                lastTokenBalance?: number;
+            }[]
+        >
+    > = new Map();
+
     private newlyPoolsMap: Map<string, number> = new Map();
 
     private mappingPoolToTokenMap: Map<string, string> = new Map();
@@ -56,10 +70,6 @@ export class GeyserSwapEventService implements OnModuleInit {
         {
             timestamp: Date;
             mcap: number;
-            holdOver5M: number;
-            holdOver10M: number;
-            holdOver20M: number;
-            holdOver30M: number;
             top10: number;
             holders: number;
         }[]
@@ -81,61 +91,6 @@ export class GeyserSwapEventService implements OnModuleInit {
     constructor(private readonly eventEmitter: EventEmitter2) {}
 
     async onModuleInit() {
-        // setInterval(() => {
-        //   // console.debug(
-        //   //   `=========================== Size: ${this.mapPotentialPool.size} ======================`,
-        //   // );
-        //   for (const [key, value] of this.mapPotentialPool.entries()) {
-        //     const metrics = this._calculateMetrics(key);
-        //     const win = parseFloat((value.maxPrice / value.entryPrice).toFixed(2));
-        //     const currentPrice = this.mapCurrentPrices.get(key);
-        //     const currentPnl = parseFloat(
-        //       (currentPrice / value.entryPrice).toFixed(2),
-        //     );
-        //     if (metrics.buys + metrics.sells > 53 && !this.smlBoughtMap.has(key)) {
-        //       this.smlBoughtMap.set(key, {
-        //         entryPrice: currentPrice,
-        //         mcapBuy: Number((currentPrice * 10 ** 9 * 140).toFixed(2)),
-        //         maxPrice: currentPrice,
-        //       });
-        //     }
-        //     const durationWin =
-        //       (value.maxAt.getTime() - value.capturedAt.getTime()) / 1000 / 60;
-        //     // console.debug(
-        //     //   `${key} - ${value.sol.toFixed(2)}sol - ${win} - ${currentPnl} - ${durationWin.toFixed(2)}m`,
-        //     // );
-        //     if (metrics.buys == 0 && metrics.sells == 0) {
-        //       this.closedPool.push({
-        //         pair: key,
-        //         sol: value.sol,
-        //         maxPnl: win,
-        //         closedPnl: currentPnl,
-        //         durationWin,
-        //       });
-        //       this.mapPotentialPool.delete(key);
-        //       this.mapCurrentPrices.delete(key);
-        //       this.trackingPoolTxns.delete(key);
-        //       this.newlyPoolsMap.delete(key);
-        //     }
-        //   }
-        //   // console.debug(
-        //   //   `=========================== Closed Pool: ${this.closedPool.length} ======================`,
-        //   // );
-        //   // this.closedPool.map((item) => {
-        //   //   console.debug(
-        //   //     `${item.pair} - ${item.sol}sol - ${item.maxPnl} - ${item.closedPnl} - ${item.durationWin}m`,
-        //   //   );
-        //   // });
-        //   // console.debug(
-        //   //   `=========================== Sml buys: ${this.smlBoughtMap.size} ======================`,
-        //   // );
-        //   // for (const [key, value] of this.smlBoughtMap.entries()) {
-        //   //   console.debug(
-        //   //     `${key} - ${(value.mcapBuy / 1000).toFixed(2)}k - ${Number((value.maxPrice / value.entryPrice).toFixed(2))}`,
-        //   //   );
-        //   // }
-        //   // console.debug('\n\n');
-        // }, 10 * 1000);
         setInterval(async () => {
             const holders = Array.from(this.newlyPoolsMap, ([pair, value]) => ({
                 pair,
@@ -149,11 +104,13 @@ export class GeyserSwapEventService implements OnModuleInit {
                     let holdersMetric;
                     try {
                         holdersMetric = await this._fetchHolders(token, pair);
+                        delete holdersMetric.top10Holders;
                     } catch (e) {}
                     if (!holdersMetric) return;
 
                     const volumeMetrics = this._calculateMetrics(pair);
                     const whales = this.trackingWhaleTxns.get(pair);
+                    const firstTop10 = this.trackingFistTop10.get(pair);
                     const mcap = Math.floor((this.mapCurrentPrices.get(pair) * 10 ** 9 * 176) / 1000);
                     const currMetric = {
                         timestamp: new Date(),
@@ -169,15 +126,23 @@ export class GeyserSwapEventService implements OnModuleInit {
                                 };
                             }),
                         ],
+                        firstTop10Txns: [
+                            ...Object.entries(firstTop10)?.map(([address, txns]) => {
+                                const newTxns = txns.map((txn) => ({ ...txn }));
+                                if (txns[0].lastTokenBalance < 1) delete this.trackingFistTop10.get(pair)[address];
+
+                                return {
+                                    address,
+                                    txns: newTxns,
+                                };
+                            }),
+                        ],
                         ...holdersMetric,
                         ...volumeMetrics,
                     };
                     const newVal = this.trackingHoldersMap.get(pair) ? [...this.trackingHoldersMap.get(pair), currMetric] : [currMetric];
                     this.trackingHoldersMap.set(pair, newVal);
-                    // const rate =
-                    //   (newVal[newVal.length - 1].mcap - newVal[newVal.length - 2]?.mcap) /
-                    //   newVal[newVal.length - 2]?.mcap;
-                    // if (mcap > 30 && mcap < 2000 && newVal.length > 1 && rate > 0.05)
+
                     const data = this.trackingHoldersMap.get(pair);
                     if (data && data.length > 0) {
                         const filePath = path.join(__dirname, `${pair}.json`);
@@ -188,6 +153,7 @@ export class GeyserSwapEventService implements OnModuleInit {
                     if (mcap < 30 || data.length > 100) {
                         this.trackingHoldersMap.delete(pair);
                         this.trackingWhaleTxns.delete(pair);
+                        this.trackingFistTop10.delete(pair);
                         this.trackingPoolTxns.delete(pair);
                         this.newlyPoolsMap.delete(pair);
                     }
@@ -244,15 +210,24 @@ export class GeyserSwapEventService implements OnModuleInit {
 
     private _detectPrice(decodedTxns: IDecodedTxn[]) {
         decodedTxns.map((item) => {
+            const baseMint = item.inMint == WSOL_MINT_ADDRESS ? item.outMint : item.inMint;
             if (item.type == 'add' && item.isMigratedFromPump) {
                 console.log('migrated', item.pair);
                 this.newlyPoolsMap.set(item.pair, 1);
                 this.trackingWhaleTxns.set(item.pair, {});
+                this._fetchHolders(baseMint, item.pair).then((data) => {
+                    const temp = {};
+                    const timestamp = new Date();
+                    Object.entries(data.top10Holders).map(([addr, balance]) => {
+                        temp[addr] = [{ timestamp, lastTokenBalance: Number(balance) }];
+                    });
+
+                    this.trackingFistTop10.set(item.pair, temp);
+                });
             }
 
             if (item.type != 'swap') return;
             if (!this.newlyPoolsMap.has(item.pair)) return;
-            if (item.inMint != WSOL_MINT_ADDRESS && item.outMint != WSOL_MINT_ADDRESS) return;
 
             const lastInBalance = item.tokenVaultIn.postUiAmount;
             const lastOutBalance = item.tokenVaultOut.postUiAmount;
@@ -267,66 +242,11 @@ export class GeyserSwapEventService implements OnModuleInit {
             const type = item.inMint == WSOL_MINT_ADDRESS ? 'buy' : 'sell';
             const amountSol = item.inMint == WSOL_MINT_ADDRESS ? item.inUiAmount : item.outUiAmount;
             const amountToken = item.inMint == WSOL_MINT_ADDRESS ? item.outUiAmount : item.inUiAmount;
-            const baseMint = item.inMint == WSOL_MINT_ADDRESS ? item.outMint : item.inMint;
 
             if (!this.mappingPoolToTokenMap.has(item.pair)) this.mappingPoolToTokenMap.set(item.pair, baseMint);
 
             this._trackPoolTxns(item, type, amountSol);
             this._trackWhaleTxns(item, type, amountSol, amountToken);
-
-            // TODO: type buy
-            // if (type == 'buy' && amountSol > 11) {
-            //   // omit sandwich attack
-            //   setTimeout(() => {
-            //     if (!this.mapPotentialPool.has(item.pair)) {
-            //       const offsetPrice = txnPrice - this.mapCurrentPrices.get(item.pair);
-
-            //       // sandwich, since the offset is over 20%
-            //       if (offsetPrice > 0 && offsetPrice / txnPrice > 0.1) return;
-
-            //       const buyAt = new Date();
-            //       const mcapBuy =
-            //         this.mapCurrentPrices.get(item.pair) * 10 ** 9 * 140;
-
-            //       // over 3M$
-            //       if (mcapBuy / 1000 > 3000) return;
-            //       this.mapPotentialPool.set(item.pair, {
-            //         maker: item.signer,
-            //         entryPrice: this.mapCurrentPrices.get(item.pair),
-            //         sol: amountSol,
-            //         mcapBuy,
-            //         maxPrice: this.mapCurrentPrices.get(item.pair),
-            //         maxAt: buyAt,
-            //         capturedAt: buyAt,
-            //       });
-            //     }
-            //   }, 2000);
-            // }
-
-            // if (type == 'sell' && amountSol > 21) {
-            //   // omit sandwich attack
-            //   setTimeout(() => {
-            //     if (!this.mapPotentialPool.has(item.pair)) {
-            //       const offsetPrice = this.mapCurrentPrices.get(item.pair) - txnPrice;
-
-            //       // sandwich, since the offset is over 20%
-            //       if (offsetPrice > 0 && offsetPrice / txnPrice > 0.1) return;
-
-            //       const sellAt = new Date();
-            //       const mcapBuy =
-            //         this.mapCurrentPrices.get(item.pair) * 10 ** 9 * 140;
-            //       this.mapPotentialPool.set(item.pair, {
-            //         maker: item.signer,
-            //         entryPrice: this.mapCurrentPrices.get(item.pair),
-            //         sol: amountSol,
-            //         mcapBuy,
-            //         maxPrice: this.mapCurrentPrices.get(item.pair),
-            //         maxAt: sellAt,
-            //         capturedAt: sellAt,
-            //       });
-            //     }
-            //   }, 3000);
-            // }
         });
     }
 
@@ -350,6 +270,16 @@ export class GeyserSwapEventService implements OnModuleInit {
         if (!this.newlyPoolsMap.has(txn.pair)) return;
 
         const date = new Date();
+
+        if (this.trackingFistTop10.get(txn.pair)?.[txn.signer]) {
+            this.trackingFistTop10.get(txn.pair)[txn.signer].push({
+                timestamp: date,
+                type,
+                amountSol,
+                amountToken,
+            });
+        }
+
         if (this.trackingWhaleTxns.get(txn.pair)[txn.signer]) {
             this.trackingWhaleTxns.get(txn.pair)[txn.signer].push({
                 timestamp: date,
@@ -413,79 +343,6 @@ export class GeyserSwapEventService implements OnModuleInit {
         };
     }
 
-    private async _decideToBuy(detectedTxn: any[]) {
-        if (detectedTxn[0]?.type == 'add' && detectedTxn[0]?.isMigratedFromPump == true) {
-            this.logger.debug(`=========================== ADD LIQUIDITY, PAIR: ${detectedTxn[0].pair} ======================`);
-            const swap = detectedTxn[1];
-            if (!swap || swap.inMint != WSOL_MINT_ADDRESS) return;
-
-            if (this.mapBoughtPools.has(swap.pair)) {
-                return;
-            }
-
-            this.mapBoughtPools.set(swap.pair, 1);
-
-            if (swap.inUiAmount > 40 && swap.inUiAmount < 55) {
-                setTimeout(() => this._buy(swap.pair), 4 * 1000);
-            } else if (swap.inUiAmount > 55) {
-                setTimeout(() => this._buy(swap.pair), 40 * 1000);
-            }
-        }
-    }
-
-    private async _buy(pair: string) {
-        let data = JSON.stringify([
-            {
-                type: 'trading',
-                side: 'buy',
-                unit: 'amount',
-                walletAddress: '6ZKTRyt8VF9PvE4gfsppvWroBbCdqvUUjTpn7sDYSyWa',
-                poolId: pair,
-                amount: 0.01,
-                slippage: 20,
-                priorityFee: 0.00001,
-                tipAmount: 0,
-            },
-        ]);
-
-        let config = {
-            method: 'post',
-            maxBodyLength: Infinity,
-            url: 'https://api.dex3.ai/trades/buysell/v2',
-            headers: {
-                accept: 'application/json',
-                'accept-language': 'en-US,en;q=0.9',
-                'access-control-allow-origin': '*',
-                'cache-control': 'no-cache',
-                clienttimestamp: new Date().getTime().toString(),
-                'content-type': 'application/json',
-                origin: 'https://dex3.ai',
-                pragma: 'no-cache',
-                priority: 'u=1, i',
-                referer: 'https://dex3.ai/',
-                'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"macOS"',
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-site',
-                'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-                Cookie: '_ga=GA1.1.790812821.1742801528; refreshToken=s%3AeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjEzMjAsImppZCI6IjRkNzMzZTY5LTFlYzctNDM5My05MGVhLTI1MWYwMzI5NGY1NyIsInJlZnJlc2hUb2tlbiI6dHJ1ZSwiaWF0IjoxNzQ1MjI5NjI3LCJleHAiOjE3NDY1MjU2Mjd9.JR_0DGIHjmeyjmaYnJfMSTcVlsJ1Ojg2_9dAVuYAI2g.Fw%2F7Jo1WI67Qj5qA%2F%2BUhzxOwNWlyHFqhrWuNSEOBDew; _ga_ME8GZB3L70=GS1.1.1745234193.54.1.1745234284.60.0.0; authorization=s%3ABearer%20eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjEzMjAsImppZCI6IjRkNzMzZTY5LTFlYzctNDM5My05MGVhLTI1MWYwMzI5NGY1NyIsImlhdCI6MTc0NTIzNDMwNiwiZXhwIjoxNzQ1MjM3OTA2fQ.yr1hrfhdt1AK8i6yLsdD6LVxlNd5FNuqjjOEFLeiLQ0.dWQTHKbX0lEpwIDred2S1JxCyFzGVrOptw6J8HtI%2FNQ; AWSALB=8/5+Sc5DrCXlyW5oWFlyPM3Vl4k/zpubpPwZWzsm4vOmAmGaC1/Mlcl6E1d2F0DC0wvbepMfgTk5k4v0JNniwI7rsgBXGrmy7wyXuTk3tprphNYSCLEGBMeod79FJpvept0lGA47xcL3Y7LXMUoUKQ4HLCPQRopS9EiwYZ3RJ/GPCZ0b5CsoVGXzfIonMw==; AWSALBCORS=8/5+Sc5DrCXlyW5oWFlyPM3Vl4k/zpubpPwZWzsm4vOmAmGaC1/Mlcl6E1d2F0DC0wvbepMfgTk5k4v0JNniwI7rsgBXGrmy7wyXuTk3tprphNYSCLEGBMeod79FJpvept0lGA47xcL3Y7LXMUoUKQ4HLCPQRopS9EiwYZ3RJ/GPCZ0b5CsoVGXzfIonMw==; AWSALB=fhASVLmeDWlslspx7bKD5mqvnpy4xivfhe+O6GOqXGRexqLeqm8By4Fqd1r4C0uoKlynLM+3BMUzJHdLNnTy8meUOgH0kUmrtOuSVkpDcbDSJNgCEQ4WBOTQk9bvqDLP4pi3bm6fGLJ3DOMsi7R80Vsb7kG755tZZXp7QnpuMB/Ot6ey5NoMbkuvUI86Vw==; AWSALBCORS=fhASVLmeDWlslspx7bKD5mqvnpy4xivfhe+O6GOqXGRexqLeqm8By4Fqd1r4C0uoKlynLM+3BMUzJHdLNnTy8meUOgH0kUmrtOuSVkpDcbDSJNgCEQ4WBOTQk9bvqDLP4pi3bm6fGLJ3DOMsi7R80Vsb7kG755tZZXp7QnpuMB/Ot6ey5NoMbkuvUI86Vw==; authorization=s%3ABearer%20eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MjEzMjAsImppZCI6IjRkNzMzZTY5LTFlYzctNDM5My05MGVhLTI1MWYwMzI5NGY1NyIsImlhdCI6MTc0NTIzNDM3NywiZXhwIjoxNzQ1MjM3OTc3fQ.jzMHQyw5gtAATR3GybZTP1sUvnKt_R69Y_HeZ4s8jos.PQ5I10hw1M1fDk9I88meHxa5vH4lZvrPhMR2qTW4KbA',
-            },
-            data: data,
-        };
-
-        await axios
-            .request(config)
-            .then((response) => {
-                this.logger.debug('=========================== BOUGHT SUCCESSFULLY ======================');
-                this.logger.log(JSON.stringify(response.data));
-            })
-            .catch((error) => {
-                console.log(error);
-            });
-    }
-
     private async _fetchHolders(mint: string, pair: string) {
         let data = '';
 
@@ -510,42 +367,36 @@ export class GeyserSwapEventService implements OnModuleInit {
             val[0].lastTokenBalance = 0;
         });
 
-        let holdOver5M = 0;
-        let holdOver10M = 0;
-        let holdOver20M = 0;
-        let holdOver30M = 0;
-        let realHolders = 0;
+        if (this.trackingFistTop10.get(pair))
+            Object.values(this.trackingFistTop10.get(pair)).forEach((val) => {
+                val[0].lastTokenBalance = 0;
+            });
+
+        const top10Holders = {};
         const top10 = Object.entries(holders)
             .filter(([balance, addr]) => {
                 if (addr == pair) return false;
 
-                const realBal = Number(balance) / 10 ** 6;
-                if (realBal >= 5 && realBal < 10) holdOver5M += 1;
-                if (realBal >= 10 && realBal < 20) holdOver10M += 1;
-                if (realBal >= 20 && realBal < 30) holdOver20M += 1;
-                if (realBal >= 30) holdOver30M += 1;
-
-                if (Number(balance) > 1000) realHolders += 1;
-
                 if (this.trackingWhaleTxns.get(pair)[addr as any]) {
                     this.trackingWhaleTxns.get(pair)[addr as any][0].lastTokenBalance = Number(balance);
+                }
+
+                if (this.trackingFistTop10.get(pair)?.[addr as any]) {
+                    this.trackingFistTop10.get(pair)[addr as any][0].lastTokenBalance = Number(balance);
                 }
 
                 return true;
             })
             .slice(-10)
             .reduce((total, [balance, addr]) => {
+                top10Holders[addr as any] = balance;
                 return (total += Number(balance));
             }, 0);
 
         return {
-            holdOver5M,
-            holdOver10M,
-            holdOver20M,
-            holdOver30M,
             top10: Math.floor((top10 / 10 ** 9) * 100),
+            top10Holders,
             holders: Object.keys(holders).length,
-            realHolders,
         };
     }
 }
