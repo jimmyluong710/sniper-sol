@@ -12,10 +12,6 @@ const WSOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
 
 @Injectable()
 export class GeyserSwapEventService implements OnModuleInit {
-    private logger = new Logger(GeyserSwapEventService.name);
-
-    private mapBoughtPools: Map<string, number> = new Map();
-
     private mapPotentialPool: Map<
         string,
         {
@@ -83,10 +79,6 @@ export class GeyserSwapEventService implements OnModuleInit {
             maxPrice: number;
         }
     > = new Map();
-
-    private closedPool = [];
-
-    private slotMap = new Map();
 
     constructor(private readonly eventEmitter: EventEmitter2) {}
 
@@ -159,7 +151,7 @@ export class GeyserSwapEventService implements OnModuleInit {
                     }
                 }),
             );
-        }, 20 * 1000);
+        }, 15 * 1000);
     }
 
     async startSubscribing(commitment: CommitmentLevel): Promise<void> {
@@ -327,10 +319,10 @@ export class GeyserSwapEventService implements OnModuleInit {
 
     private _calculateMetrics(pair: string) {
         const now = Date.now();
-        const oneMinuteAgo = now - 60 * 1000;
+        const timeframe = now - 15 * 1000;
 
         const transactions = this.trackingPoolTxns.get(pair);
-        const recentTxns = transactions.filter((txn) => txn.timestamp > oneMinuteAgo);
+        const recentTxns = transactions.filter((txn) => txn.timestamp > timeframe);
 
         const buys = recentTxns.filter((txn) => txn.type === 'buy');
         const sells = recentTxns.filter((txn) => txn.type === 'sell');
